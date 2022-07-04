@@ -1,14 +1,19 @@
-pub mod r#type;
-pub mod core;
-pub mod module;
-
 use sqlx::{PgPool};
 use once_cell::sync::OnceCell;
 use actix_web::{App, web, rt, HttpServer, HttpResponse};
 use actix_session::{SessionMiddleware, storage::RedisActorSessionStore};
-use crate::core::{index::RWRouter, tls::RWTLS, server::*, database::RWDatabase};
+
+use r_webservice::core::{
+    server::*,
+    tls::RWTLS,
+    cache::RWCache,
+    index::RWRouter,
+    request::RequestValue,
+    database::RWDatabase,
+};
 
 static DB_POOL: OnceCell<PgPool> = OnceCell::new();
+static MEM_CACHE: OnceCell<RWCache> = OnceCell::new();
 
 fn main() {
     let server_builder = move |config: RWServerConfig| -> Result<_, Box<dyn std::error::Error>> {
@@ -21,6 +26,8 @@ fn main() {
             20,
         );
 
+        //RequestValue::<String>::set_config("temporary/");
+
         rt::System::new().block_on(db.connect());
         let _ = DB_POOL.set(db.get_pool().unwrap());
 
@@ -28,9 +35,10 @@ fn main() {
         let mut server = HttpServer::new(move || {
             App::new()
             .app_data(web::Data::new(DB_POOL.get()))
+            .app_data(web::Data::new(MEM_CACHE.get()))
             .configure(
                 |cfg| {
-                    RWRouter::route(cfg, DB_POOL.get().unwrap())
+                    RWRouter::route(cfg, DB_POOL.get().unwrap(), &MEM_CACHE)
                 }
             )
             .default_service(web::to(|| HttpResponse::NotFound()))
