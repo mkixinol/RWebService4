@@ -36,6 +36,8 @@ pub enum ServerError {
     TemplateModuleError,
     #[display(fmt = "Template Type Error")]
     TemplateTypeError,
+    #[display(fmt = "Serde Parse Error")]
+    SerdeParseError,
 }
 
 impl ResponseError for ServiceError {
@@ -60,5 +62,11 @@ impl ResponseError for ServiceError {
 impl From<ServerError> for ServiceError {
     fn from(item: ServerError) -> Self {
         ServiceError::HTTPRequestInternalServerError(item)
+    }
+}
+
+impl From<serde_json::Error> for ServiceError {
+    fn from(item: serde_json::Error) -> Self {
+        ServerError::SerdeParseError.into()
     }
 }

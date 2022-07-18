@@ -33,7 +33,7 @@ impl RWIndex {
         let mut response = Vec::new();
         while let Some(tree) = template_tree {
             if let Some(id) = tree.id() {
-                println!("{}", &id);
+                println!("action: {}", &id);
                 if let Some(template) = cache.get_ref().unwrap().get_template(&id) {
                     if let Ok((status, value)) = template.execute(
                         db.get_ref().unwrap(),
