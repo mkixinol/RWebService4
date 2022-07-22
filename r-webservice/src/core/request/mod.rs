@@ -61,11 +61,15 @@ where
     }
 }
 
-pub enum RequestValueInner<T> {
+pub enum RequestValueMarker<T> {
     Marker,
     MarkerPending,
     MarkerProcessed,
     MarkerDone(T),
+}
+
+pub enum RequestValueInner<T> {
+    Marker(RequestValueMarker<T>),
     Query(Ready<Result<web::Query<T>, Error>>),
     Json(web::JsonBody<T>),
     Multipart(Ready<Result<Multipart, Error>>),
@@ -104,7 +108,7 @@ where
                         todo!()
                     }
                     _ => {
-                        RequestValueInner::Marker
+                        RequestValueInner::Marker(RequestValueMarker::Marker)
                     }
                 }
             }
@@ -116,17 +120,17 @@ where
                         )
                     }
                     _ => {
-                        RequestValueInner::Marker
+                        RequestValueInner::Marker(RequestValueMarker::Marker)
                     }
                 }
             }
-            _ => {RequestValueInner::Marker}
+            _ => {RequestValueInner::Marker(RequestValueMarker::Marker)}
         };
         
         Self {
             request: request.clone(),
-            path: RequestValueInner::Marker,
-            query: RequestValueInner::Marker,
+            path: RequestValueInner::Marker(RequestValueMarker::Marker),
+            query: RequestValueInner::Marker(RequestValueMarker::Marker),
             body: body
         }
     }
@@ -143,20 +147,20 @@ where
         let this = self.get_mut();
 
         // Path
-        if let RequestValueInner::Marker = this.path {
+        if let RequestValueInner::Marker(RequestValueMarker::Marker) = this.path {
             let path: HashMap<&str, &str> = this.request.match_info().iter().collect();
             let pathres = serde_json::from_value(serde_json::to_value(path)?);
-            this.path = RequestValueInner::MarkerDone(pathres?);
+            this.path = RequestValueInner::Marker(RequestValueMarker::MarkerDone(pathres?));
         }
 
         // Query
-        if let RequestValueInner::Marker = &this.query {
+        if let RequestValueInner::Marker(RequestValueMarker::Marker) = &this.query {
             let query = web::Query::extract(&this.request);
             this.query = RequestValueInner::Query(query);
         }
         if let RequestValueInner::Query(query) = &mut this.query {
             if let Poll::Ready(res) = Pin::new(query).poll(cx) {
-                this.query = RequestValueInner::MarkerDone(res.unwrap().into_inner());
+                this.query = RequestValueInner::Marker(RequestValueMarker::MarkerDone(res.unwrap().into_inner()));
             } else {
                 return Poll::Pending;
             }
@@ -164,21 +168,29 @@ where
 
         // Body
         let mut f = |body: &mut RequestValueInner<B>| {
-            if let RequestValueInner::MarkerPending = body {
+            if let RequestValueInner::Marker(RequestValueMarker::MarkerPending) = body {
                 Ok(None)
             } else if let RequestValueInner::Json(json) = body {
                 if let Poll::Ready(ready) = Pin::new(json).poll(cx) {
-                    Ok(Some(RequestValueInner::MarkerDone(ready.unwrap())))
+                    Ok(Some(RequestValueInner::Marker(RequestValueMarker::MarkerDone(ready.unwrap()))))
                 } else {
                     Ok(None)
                 }
             } else if let RequestValueInner::Multipart(multipart) = body {
+                println!("176");
                 if let Poll::Ready(payload) = Pin::new(multipart).poll(cx) {
+                    println!("178");
                     if let Ok(mut data) = payload {
-                        while let form = Pin::new(&mut data).try_poll_next(cx) {
-
+                        println!("180");
+                        while let form = Pin::new(&mut data).poll_next(cx) {
+                            println!("{:#?}", form);
+                            if let Poll::Ready(r) = form {
+                                return Err(ServiceError::HTTPRequestBadRequest);
+                            } else {
+                                return Ok(None);
+                            }
                         }
-                        Ok(None)
+                        Err(ServiceError::HTTPRequestBadRequest)
                     } else {
                         Err(ServiceError::HTTPRequestBadRequest)
                     }
@@ -201,13 +213,13 @@ where
         };
 
         // Return val
-        let mut body = std::mem::replace(&mut this.body, RequestValueInner::MarkerPending);
+        let mut body = std::mem::replace(&mut this.body, RequestValueInner::Marker(RequestValueMarker::MarkerPending));
         match f(&mut body) {
             Ok(Some(result)) => {
                 this.body = result;
-                if let RequestValueInner::MarkerDone(path) = std::mem::replace(&mut this.path, RequestValueInner::MarkerProcessed) {
-                    if let RequestValueInner::MarkerDone(query) = std::mem::replace(&mut this.query, RequestValueInner::MarkerProcessed) {
-                        if let RequestValueInner::MarkerDone(body) = std::mem::replace(&mut this.body, RequestValueInner::MarkerProcessed) {
+                if let RequestValueInner::Marker(RequestValueMarker::MarkerDone(path)) = std::mem::replace(&mut this.path, RequestValueInner::Marker(RequestValueMarker::MarkerProcessed)) {
+                    if let RequestValueInner::Marker(RequestValueMarker::MarkerDone(query)) = std::mem::replace(&mut this.query, RequestValueInner::Marker(RequestValueMarker::MarkerProcessed)) {
+                        if let RequestValueInner::Marker(RequestValueMarker::MarkerDone(body)) = std::mem::replace(&mut this.body, RequestValueInner::Marker(RequestValueMarker::MarkerProcessed)) {
                             cx.waker().wake_by_ref();
                             Poll::Ready(
                                 Ok(
